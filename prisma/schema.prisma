@@ -32,10 +32,11 @@ model Targets{
   id String @id @default(uuid())
   targetName String
   targetDate DateTime
-  completed Boolean
   startDate DateTime
   noOfDays Int
+  isActive Boolean 
   userId String
+
   user User @relation(fields: [userId], references: [id])
 
   productivityLogs productivityLog[]
@@ -44,6 +45,8 @@ model Targets{
 model productivityLog {
   id String @id @default(uuid())
   date DateTime
+  description String
+  idProductive Boolean
   productivityRating Int
   taskId String
   userId String

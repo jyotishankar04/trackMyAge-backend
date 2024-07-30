@@ -19,6 +19,9 @@ const authenticate = (req: Request, res: Response, next: NextFunction) => {
 
   try {
     const payload = jwt.verify(token, config.JWT_SECRET as string);
+    if (!payload) {
+      return next(createHttpError("401", "Unauthorized"));
+    }
     const _req = req as AuthRequest;
     _req.userId = payload.sub as string;
     next();

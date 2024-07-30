@@ -11,6 +11,10 @@ import bcrypt from "bcrypt";
 import prisma from "../config/prismaDb";
 import { config } from "../config/config";
 import { date } from "zod";
+import { dateToDatetimeConverter } from "../utils/dateToDatetimeConverter";
+import { calculateAge, calculateSpanAge } from "../utils/ageCalculater";
+import { getTargetStatistics } from "../utils/allStats";
+import { calculateCompletedDays, calculateDays } from "../utils/daysCalculate";
 const userRegistration = async (
   req: Request,
   res: Response,
@@ -34,7 +38,6 @@ const userRegistration = async (
     return next(createHttpError("500", "Error in checking email existence"));
   }
   const hashedPassword = await bcrypt.hash(password, 10);
-
   try {
     const user = await prisma.user.create({
       data: {
@@ -99,14 +102,14 @@ const userDataUpdate = async (
   if (!idExists) {
     return next(createHttpError("404", "User not found"));
   }
-
-  const age = new Date().getFullYear() - new Date(dob).getFullYear();
+  const dateOfBirth = dateToDatetimeConverter(dob);
+  const age = calculateAge(String(dateOfBirth));
 
   const user = await prisma.user.update({
     where: { id: userId },
     data: {
-      dob: new Date(),
-      age: age,
+      dob: dateOfBirth,
+      age: age as number,
     },
   });
   if (!user) {
@@ -127,11 +130,77 @@ const getUserProfile = async (
       where: {
         id: userId,
       },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        dob: true,
+        age: true,
+      },
     });
 
     if (!user) {
       return next(createHttpError(404, "User not found"));
     }
+    const target = await prisma.targets.findFirst({
+      where: {
+        AND: {
+          userId: userId,
+          isActive: true,
+        },
+      },
+      select: {
+        id: true,
+        targetName: true,
+        targetDate: true,
+        isActive: true,
+        noOfDays: true,
+        startDate: true,
+        productivityLogs: {
+          select: {
+            id: true,
+            productivityRating: true,
+            date: true,
+            description: true,
+            idProductive: true,
+          },
+          orderBy: {
+            date: "asc",
+          },
+        },
+      },
+    });
+    if (!target) {
+      return res.json({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        dob: user.dob,
+        age: user.age,
+        targets: null,
+      });
+    }
+
+    const targetAge = calculateSpanAge(
+      user.age.toLocaleString(),
+      target.targetDate.toISOString()
+    );
+    const completedDays = calculateCompletedDays(
+      target.startDate.toISOString()
+    );
+    const productiveDays = target.productivityLogs.filter(
+      (log: any) => log.isProductive
+    ).length;
+
+    const completePercentage = (Number(completedDays) / target.noOfDays) * 100;
+    const unproductiveDays = Number(completedDays) - productiveDays;
+
+    const daysRemaining = target.noOfDays - Number(completedDays);
+    const avgRating =
+      target.productivityLogs.reduce(
+        (sum, log) => sum + Number(log.productivityRating),
+        0
+      ) / Number(completedDays);
 
     const userData = {
       id: user.id,
@@ -139,12 +208,35 @@ const getUserProfile = async (
       email: user.email,
       dob: user.dob,
       age: user.age,
+      targets: {
+        id: target?.id,
+
+        targetName: target?.targetName,
+        targetDate: target?.targetDate,
+        isActive: target?.isActive,
+        noOfDays: target?.noOfDays,
+        startDate: target?.startDate,
+        daysRemaining: daysRemaining,
+        targetAge: targetAge,
+        productiveDays: productiveDays,
+        completePercentage: completePercentage,
+        completedDays: completedDays,
+        unproductiveDays: unproductiveDays,
+        avgRating: avgRating,
+      },
+      productivityLogs: target.productivityLogs,
     };
 
-    return res.json(userData);
+    return res.json({ user: userData });
   } catch (error) {
     console.error(error);
     return next(createHttpError(500, "Error in fetching user profile"));
   }
+};
+
+const userLogout = async (req: Request, res: Response, next: NextFunction) => {
+  res
+    .clearCookie("accessToken")
+    .json({ message: "User logged out successfully" });
 };
 export { userRegistration, userLogin, userDataUpdate, getUserProfile };
